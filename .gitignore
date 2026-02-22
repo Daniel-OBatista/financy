@@ -39,3 +39,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Frontend
+/frontend/node_modules
+/frontend/.next
+/frontend/out
+/frontend/.env*
+
+# Backend
+/backend/node_modules
+/backend/dist
+/backend/.env*
+
+# Geral
+.DS_Store
