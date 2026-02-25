@@ -1,109 +1,75 @@
 import type { ReactElement } from "react";
-import { Route, Routes, Navigate, NavLink } from "react-router-dom";
+import { Route, Routes, Navigate, useLocation } from "react-router-dom";
 import DashboardPage from "./pages/DashboardPage";
 import CategoriesPage from "./pages/CategoriesPage";
 import TransactionsPage from "./pages/TransactionsPage";
 import LoginPage from "./pages/LoginPage";
+import CriarContaPage from "./pages/CriarContaPage";
+import RecuperarSenhaPage from "./pages/RecuperarSenhaPage";
+import ProfilePage from "./pages/ProfilePage";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import { useAuth } from "./auth/AuthProvider";
-
-function NavItem({
-  to,
-  label,
-}: {
-  to: string;
-  label: string;
-}): ReactElement {
-  return (
-    <NavLink
-      to={to}
-      className={({ isActive }) =>
-        [
-          "rounded-2xl border px-4 py-2 text-sm font-semibold transition",
-          "focus:outline-none focus:ring-4 focus:ring-primary/15",
-          isActive
-            ? "border-primary/35 bg-primary/10 text-fg"
-            : "border-border/25 bg-card/40 text-muted hover:bg-card/60 hover:text-fg",
-        ].join(" ")
-      }
-    >
-      {label}
-    </NavLink>
-  );
-}
-
-function Header(): ReactElement | null {
-  const { isAuthenticated, user, signOut } = useAuth();
-
-  if (!isAuthenticated) return null;
-
-  return (
-    <header className="sticky top-0 z-20 -mx-4 mb-6 border-b border-border/20 bg-bg/70 px-4 py-4 backdrop-blur">
-      <div className="mx-auto w-full max-w-6xl">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="flex items-center gap-3">
-            <img
-              src="/financy.png"
-              alt="Financy"
-              className="h-10 w-10 rounded-2xl border border-border/30 bg-card/60 object-contain p-2"
-            />
-
-            <div className="min-w-0">
-              <h1 className="text-2xl font-black tracking-tight sm:text-3xl">
-                Financy
-              </h1>
-              <p className="text-xs text-muted sm:text-sm">
-                Prisma + SQLite no backend • Apollo no front
-              </p>
-            </div>
-          </div>
-
-          <div className="sm:ml-auto flex flex-wrap items-center gap-2">
-            {user?.email ? (
-              <span className="mr-1 inline-flex items-center rounded-2xl border border-border/25 bg-card/40 px-3 py-2 text-xs font-semibold text-muted">
-                {user.email}
-              </span>
-            ) : null}
-
-            <NavItem to="/dashboard" label="Dashboard" />
-            <NavItem to="/transactions" label="Transações" />
-            <NavItem to="/categories" label="Categorias" />
-
-            <button
-              onClick={signOut}
-              type="button"
-              className="rounded-2xl border border-border/25 bg-card/40 px-4 py-2 text-sm font-semibold text-muted transition hover:bg-card/60 hover:text-fg focus:outline-none focus:ring-4 focus:ring-primary/15"
-            >
-              Sair
-            </button>
-          </div>
-        </div>
-      </div>
-    </header>
-  );
-}
+import AppHeader from "./components/AppHeader";
 
 export default function App(): ReactElement {
   const { isAuthenticated } = useAuth();
+  const location = useLocation();
 
-  return (
-    <div className="min-h-dvh bg-bg text-fg font-sans antialiased">
-      <div className="mx-auto w-full max-w-6xl px-4 pb-10">
-        <Header />
+  const isAuthRoute =
+    location.pathname === "/login" ||
+    location.pathname === "/criar-conta" ||
+    location.pathname === "/recuperar-senha";
 
-        <main>
+  // ✅ AuthLayout (sem header)
+  if (isAuthRoute) {
+    return (
+      <main className="min-h-dvh bg-app-bg">
+        <div className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col items-center justify-center gap-8 px-4 py-10">
+          <div className="flex items-center justify-center">
+            <img
+              src="/financy.png"
+              alt="Financy"
+              width={134}
+              height={32}
+              draggable={false}
+              className="h-8 w-[134px] select-none object-contain"
+            />
+          </div>
+
           <Routes>
             <Route
-              path="/"
+              path="/login"
+              element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />}
+            />
+
+            <Route
+              path="/criar-conta"
+              element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <CriarContaPage />}
+            />
+
+            <Route
+              path="/recuperar-senha"
               element={
-                <Navigate
-                  to={isAuthenticated ? "/dashboard" : "/login"}
-                  replace
-                />
+                isAuthenticated ? <Navigate to="/dashboard" replace /> : <RecuperarSenhaPage />
               }
             />
 
-            <Route path="/login" element={<LoginPage />} />
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+        </div>
+      </main>
+    );
+  }
+
+  // ✅ App normal (header global + páginas)
+  return (
+    <div className="min-h-dvh bg-bg text-fg font-sans antialiased">
+      <AppHeader />
+
+      <div className="mx-auto w-full max-w-[1280px] px-12 pb-10 pt-6">
+        <main>
+          <Routes>
+            <Route path="/" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} replace />} />
 
             <Route
               path="/dashboard"
@@ -128,6 +94,16 @@ export default function App(): ReactElement {
               element={
                 <ProtectedRoute>
                   <CategoriesPage />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ✅ NOVA ROTA */}
+            <Route
+              path="/perfil"
+              element={
+                <ProtectedRoute>
+                  <ProfilePage />
                 </ProtectedRoute>
               }
             />

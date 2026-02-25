@@ -1,15 +1,28 @@
 import type { ReactElement } from "react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { Link } from "react-router-dom";
 import { useQuery } from "@apollo/client/react";
 import {
   type Transaction,
   GET_TRANSACTIONS,
 } from "../graphql/ops";
-import { brlFromCents, isoToBR } from "../lib/format";
+import { brlFromCents } from "../lib/format";
+import {
+  Wallet,
+  ArrowUpRight,
+  ArrowDownRight,
+  Plus,
+  ChevronRight,
+  UtensilsCrossed,
+  Car,
+  ShoppingCart,
+  Film,
+  Wrench,
+  TrendingUp,
+  Tag,
+} from "lucide-react";
 
 type GetTransactionsData = { transactions: Transaction[] };
-
-type SortKey = "date_desc" | "date_asc" | "az" | "za" | "amount_desc" | "amount_asc";
 
 function ymd(isoLike: string): { y: number; m: number; d: number } | null {
   // suporta "YYYY-MM-DD" e ISO com hora
@@ -23,282 +36,410 @@ function ymd(isoLike: string): { y: number; m: number; d: number } | null {
   return { y, m, d };
 }
 
-function monthLabel(m: number): string {
-  const labels = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-  return labels[m - 1] ?? String(m);
+function dateMs(isoLike: string): number {
+  // garante ordenação consistente
+  const hasTime = isoLike.includes("T");
+  const s = hasTime ? isoLike : `${isoLike}T00:00:00.000Z`;
+  const t = new Date(s).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+function isoToBRShort(isoLike: string): string {
+  const parts = ymd(isoLike);
+  if (!parts) return "—";
+  const dd = String(parts.d).padStart(2, "0");
+  const mm = String(parts.m).padStart(2, "0");
+  const yy = String(parts.y).slice(-2);
+  return `${dd}/${mm}/${yy}`;
+}
+
+type BadgeStyle = {
+  pillBg: string;
+  pillText: string;
+  iconBg: string;
+  iconText: string;
+  icon: ReactElement;
+};
+
+function categoryStyle(titleRaw: string | null | undefined): BadgeStyle {
+  const title = (titleRaw ?? "Outros").trim().toLowerCase();
+
+  if (title.includes("aliment")) {
+    return {
+      pillBg: "bg-blue-50",
+      pillText: "text-blue-700",
+      iconBg: "bg-blue-50",
+      iconText: "text-blue-700",
+      icon: <UtensilsCrossed className="h-4 w-4" />,
+    };
+  }
+
+  if (title.includes("transport") || title.includes("gas")) {
+    return {
+      pillBg: "bg-violet-50",
+      pillText: "text-violet-700",
+      iconBg: "bg-violet-50",
+      iconText: "text-violet-700",
+      icon: <Car className="h-4 w-4" />,
+    };
+  }
+
+  if (title.includes("mercad") || title.includes("compr")) {
+    return {
+      pillBg: "bg-orange-50",
+      pillText: "text-orange-700",
+      iconBg: "bg-orange-50",
+      iconText: "text-orange-700",
+      icon: <ShoppingCart className="h-4 w-4" />,
+    };
+  }
+
+  if (title.includes("entreten") || title.includes("lazer")) {
+    return {
+      pillBg: "bg-pink-50",
+      pillText: "text-pink-700",
+      iconBg: "bg-pink-50",
+      iconText: "text-pink-700",
+      icon: <Film className="h-4 w-4" />,
+    };
+  }
+
+  if (title.includes("util") || title.includes("conta") || title.includes("casa")) {
+    return {
+      pillBg: "bg-yellow-50",
+      pillText: "text-yellow-800",
+      iconBg: "bg-yellow-50",
+      iconText: "text-yellow-800",
+      icon: <Wrench className="h-4 w-4" />,
+    };
+  }
+
+  if (title.includes("invest")) {
+    return {
+      pillBg: "bg-emerald-50",
+      pillText: "text-emerald-700",
+      iconBg: "bg-emerald-50",
+      iconText: "text-emerald-700",
+      icon: <TrendingUp className="h-4 w-4" />,
+    };
+  }
+
+  if (title.includes("receit") || title.includes("sal")) {
+    return {
+      pillBg: "bg-emerald-50",
+      pillText: "text-emerald-700",
+      iconBg: "bg-emerald-50",
+      iconText: "text-emerald-700",
+      icon: <Tag className="h-4 w-4" />,
+    };
+  }
+
+  return {
+    pillBg: "bg-slate-100",
+    pillText: "text-slate-700",
+    iconBg: "bg-slate-100",
+    iconText: "text-slate-700",
+    icon: <Tag className="h-4 w-4" />,
+  };
+}
+
+function StatCard({
+  label,
+  value,
+  icon,
+  iconBg,
+  iconText,
+}: {
+  label: string;
+  value: string;
+  icon: ReactElement;
+  iconBg: string;
+  iconText: string;
+}): ReactElement {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className={["grid h-9 w-9 place-items-center rounded-xl", iconBg].join(" ")}>
+          <div className={iconText}>{icon}</div>
+        </div>
+
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+            {label}
+          </p>
+          <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">
+            {value}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function DashboardPage(): ReactElement {
   const txs = useQuery<GetTransactionsData>(GET_TRANSACTIONS);
 
+  const all = txs.data?.transactions ?? [];
+
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
 
-  const all = txs.data?.transactions ?? [];
-
-  const availableYears = useMemo(() => {
-    const set = new Set<number>();
-    for (const t of all) {
-      const parts = ymd(t.date);
-      if (parts) set.add(parts.y);
-    }
-    const arr = Array.from(set).sort((a, b) => b - a);
-    if (arr.length === 0) return [currentYear];
-    if (!arr.includes(currentYear)) arr.unshift(currentYear);
-    return arr;
-  }, [all, currentYear]);
-
-  const [year, setYear] = useState<number>(availableYears[0] ?? currentYear);
-  const [month, setMonth] = useState<number>(currentMonth);
-  const [q, setQ] = useState<string>("");
-  const [sort, setSort] = useState<SortKey>("date_desc");
-
-  // mantém year válido quando carregar dados
-  useMemo(() => {
-    if (!availableYears.includes(year)) setYear(availableYears[0] ?? currentYear);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [availableYears.join(","), year, currentYear]);
-
-  const periodTx = useMemo(() => {
-    const filteredByPeriod = all.filter((t) => {
-      const parts = ymd(t.date);
-      if (!parts) return false;
-      return parts.y === year && parts.m === month;
-    });
-
-    const s = q.trim().toLowerCase();
-    const filtered = s
-      ? filteredByPeriod.filter((t) => t.description.toLowerCase().includes(s))
-      : filteredByPeriod;
-
-    const sorted = [...filtered].sort((a, b) => {
-      if (sort === "az") return a.description.localeCompare(b.description);
-      if (sort === "za") return b.description.localeCompare(a.description);
-
-      if (sort === "amount_desc") return b.amountCents - a.amountCents;
-      if (sort === "amount_asc") return a.amountCents - b.amountCents;
-
-      // date
-      const ad = a.date.includes("T") ? a.date : `${a.date}T00:00:00.000Z`;
-      const bd = b.date.includes("T") ? b.date : `${b.date}T00:00:00.000Z`;
-      const at = new Date(ad).getTime();
-      const bt = new Date(bd).getTime();
-      return sort === "date_asc" ? at - bt : bt - at;
-    });
-
-    return sorted;
-  }, [all, year, month, q, sort]);
-
-  const summary = useMemo(() => {
-    const income = periodTx
+  const totals = useMemo(() => {
+    const incomeAll = all
       .filter((t) => t.type === "INCOME")
       .reduce((acc, t) => acc + t.amountCents, 0);
 
-    const expense = periodTx
+    const expenseAll = all
       .filter((t) => t.type === "EXPENSE")
       .reduce((acc, t) => acc + t.amountCents, 0);
 
-    return { income, expense, balance: income - expense };
-  }, [periodTx]);
+    const balanceAll = incomeAll - expenseAll;
 
-  const chart = useMemo(() => {
-    // Resultado (saldo) por mês no ano selecionado
-    const byMonth = Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
-      const monthTx = all.filter((t) => {
-        const parts = ymd(t.date);
-        if (!parts) return false;
-        return parts.y === year && parts.m === m;
-      });
-
-      const inc = monthTx.filter((t) => t.type === "INCOME").reduce((acc, t) => acc + t.amountCents, 0);
-      const exp = monthTx.filter((t) => t.type === "EXPENSE").reduce((acc, t) => acc + t.amountCents, 0);
-      const net = inc - exp;
-
-      return { m, net };
+    const monthTx = all.filter((t) => {
+      const parts = ymd(t.date);
+      if (!parts) return false;
+      return parts.y === currentYear && parts.m === currentMonth;
     });
 
-    const maxAbs = Math.max(1, ...byMonth.map((x) => Math.abs(x.net)));
-    return { byMonth, maxAbs };
-  }, [all, year]);
+    const incomeMonth = monthTx
+      .filter((t) => t.type === "INCOME")
+      .reduce((acc, t) => acc + t.amountCents, 0);
+
+    const expenseMonth = monthTx
+      .filter((t) => t.type === "EXPENSE")
+      .reduce((acc, t) => acc + t.amountCents, 0);
+
+    return { balanceAll, incomeMonth, expenseMonth };
+  }, [all, currentYear, currentMonth]);
+
+  const recentTx = useMemo(() => {
+    return [...all].sort((a, b) => dateMs(b.date) - dateMs(a.date)).slice(0, 5);
+  }, [all]);
+
+  type CatAgg = { title: string; count: number; totalCents: number };
+
+  const categories = useMemo((): CatAgg[] => {
+    const map = new Map<string, CatAgg>();
+
+    for (const t of all) {
+      // no dashboard do print, categorias = gastos (despesas)
+      if (t.type !== "EXPENSE") continue;
+
+      const title = t.category?.title?.trim() || "Outros";
+      const key = title.toLowerCase();
+
+      const prev = map.get(key);
+      if (!prev) {
+        map.set(key, { title, count: 1, totalCents: t.amountCents });
+      } else {
+        map.set(key, {
+          title: prev.title,
+          count: prev.count + 1,
+          totalCents: prev.totalCents + t.amountCents,
+        });
+      }
+    }
+
+    return Array.from(map.values())
+      .sort((a, b) => b.totalCents - a.totalCents)
+      .slice(0, 5);
+  }, [all]);
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="min-w-0">
-          <h2 className="text-xl font-black tracking-tight">Dashboard</h2>
-          <p className="text-sm text-muted">
-            Visão do período selecionado (mês/ano), com resumo e gráfico.
-          </p>
-        </div>
-
-        <div className="sm:ml-auto grid w-full gap-2 sm:w-auto sm:grid-cols-4">
-          <select
-            value={month}
-            onChange={(e) => setMonth(Number(e.target.value))}
-            className="rounded-2xl border border-border/25 bg-card/40 px-4 py-2.5 text-sm text-fg outline-none backdrop-blur focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
-          >
-            {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-              <option key={m} value={m}>
-                {monthLabel(m)}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={year}
-            onChange={(e) => setYear(Number(e.target.value))}
-            className="rounded-2xl border border-border/25 bg-card/40 px-4 py-2.5 text-sm text-fg outline-none backdrop-blur focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
-          >
-            {availableYears.map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
-            ))}
-          </select>
-
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Buscar descrição..."
-            className="rounded-2xl border border-border/25 bg-card/40 px-4 py-2.5 text-sm text-fg outline-none backdrop-blur focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
-          />
-
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value as SortKey)}
-            className="rounded-2xl border border-border/25 bg-card/40 px-4 py-2.5 text-sm text-fg outline-none backdrop-blur focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
-          >
-            <option value="date_desc">Data (mais recente)</option>
-            <option value="date_asc">Data (mais antiga)</option>
-            <option value="az">Descrição (A-Z)</option>
-            <option value="za">Descrição (Z-A)</option>
-            <option value="amount_desc">Valor (maior)</option>
-            <option value="amount_asc">Valor (menor)</option>
-          </select>
-        </div>
-      </div>
-
       {txs.loading ? (
-        <div className="rounded-3xl border border-border/25 bg-card/30 p-4 text-sm text-muted">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
           Carregando...
         </div>
       ) : null}
 
       {txs.error ? (
-        <div className="rounded-3xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
           Erro: {txs.error.message}
         </div>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-3xl border border-border/25 bg-card/35 p-4 backdrop-blur">
-          <p className="text-xs font-bold text-muted">Entradas ({monthLabel(month)}/{year})</p>
-          <p className="mt-1 text-lg font-black text-emerald-300">{brlFromCents(summary.income)}</p>
-        </div>
+      {/* Top cards */}
+      <div className="grid gap-4 md:grid-cols-3">
+        <StatCard
+          label="Saldo total"
+          value={brlFromCents(totals.balanceAll)}
+          icon={<Wallet className="h-4 w-4" />}
+          iconBg="bg-violet-50"
+          iconText="text-violet-700"
+        />
 
-        <div className="rounded-3xl border border-border/25 bg-card/35 p-4 backdrop-blur">
-          <p className="text-xs font-bold text-muted">Saídas ({monthLabel(month)}/{year})</p>
-          <p className="mt-1 text-lg font-black text-rose-300">{brlFromCents(summary.expense)}</p>
-        </div>
+        <StatCard
+          label="Receitas do mês"
+          value={brlFromCents(totals.incomeMonth)}
+          icon={<ArrowUpRight className="h-4 w-4" />}
+          iconBg="bg-emerald-50"
+          iconText="text-emerald-700"
+        />
 
-        <div className="rounded-3xl border border-border/25 bg-card/35 p-4 backdrop-blur">
-          <p className="text-xs font-bold text-muted">Saldo ({monthLabel(month)}/{year})</p>
-          <p className="mt-1 text-lg font-black text-fg">{brlFromCents(summary.balance)}</p>
-        </div>
+        <StatCard
+          label="Despesas do mês"
+          value={brlFromCents(totals.expenseMonth)}
+          icon={<ArrowDownRight className="h-4 w-4" />}
+          iconBg="bg-rose-50"
+          iconText="text-rose-700"
+        />
       </div>
 
-      <div className="rounded-3xl border border-border/25 bg-card/35 p-4 backdrop-blur">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-sm font-extrabold">Resultado por mês</p>
-            <p className="text-xs text-muted">Saldo (entradas - saídas) em {year}</p>
+      {/* Bottom: Recent tx + Categories */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        {/* Recent transactions */}
+        <div className="lg:col-span-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+            <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+              Transações recentes
+            </p>
+
+            <Link
+              to="/transactions"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 hover:text-emerald-800"
+            >
+              Ver todas <ChevronRight className="h-4 w-4" />
+            </Link>
           </div>
-          <span className="rounded-2xl border border-border/25 bg-card/40 px-3 py-1 text-xs font-semibold text-muted">
-            {monthLabel(month)} selecionado
-          </span>
-        </div>
 
-        <div className="mt-4 flex items-end gap-2">
-          {chart.byMonth.map((b) => {
-            const h = Math.round((Math.abs(b.net) / chart.maxAbs) * 100);
-            const isSelected = b.m === month;
-            const isPositive = b.net >= 0;
+          <div className="divide-y divide-slate-100">
+            {recentTx.map((t) => {
+              const catTitle = t.category?.title ?? (t.type === "INCOME" ? "Receita" : "Outros");
+              const st = categoryStyle(catTitle);
 
-            return (
-              <button
-                key={b.m}
-                type="button"
-                onClick={() => setMonth(b.m)}
-                className={[
-                  "group flex-1 rounded-2xl border px-2 py-2 transition",
-                  "border-border/25 bg-card/25 hover:bg-card/40",
-                  isSelected ? "ring-4 ring-primary/10 border-primary/35" : "",
-                ].join(" ")}
-                title={`${monthLabel(b.m)}: ${brlFromCents(b.net)}`}
-              >
-                <div className="flex h-24 items-end justify-center">
+              const isIncome = t.type === "INCOME";
+              const sign = isIncome ? "+" : "-";
+              const amountText = `${sign} ${brlFromCents(t.amountCents)}`;
+
+              return (
+                <div key={t.id} className="flex items-center gap-4 px-5 py-4">
                   <div
                     className={[
-                      "w-full rounded-xl transition",
-                      isPositive ? "bg-emerald-400/70" : "bg-rose-400/70",
-                      isSelected ? "opacity-100" : "opacity-70 group-hover:opacity-90",
+                      "grid h-10 w-10 place-items-center rounded-xl",
+                      st.iconBg,
                     ].join(" ")}
-                    style={{ height: `${Math.max(6, h)}%` }}
-                  />
-                </div>
-                <div className="mt-2 text-center text-[11px] font-bold text-muted">
-                  {monthLabel(b.m)}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+                    aria-hidden="true"
+                  >
+                    <div className={st.iconText}>{st.icon}</div>
+                  </div>
 
-      <div className="overflow-hidden rounded-3xl border border-border/25 bg-card/30 backdrop-blur">
-        <div className="flex items-center justify-between gap-3 border-b border-border/20 px-4 py-3">
-          <p className="text-sm font-extrabold">
-            Transações ({monthLabel(month)}/{year})
-          </p>
-          <p className="text-xs text-muted">{periodTx.length} item(ns)</p>
-        </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-slate-900">
+                      {t.description}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {isoToBRShort(t.date)}
+                    </p>
+                  </div>
 
-        <table className="w-full border-collapse text-sm">
-          <thead className="bg-card/50 text-muted">
-            <tr>
-              <th className="px-4 py-3 text-left font-extrabold">Descrição</th>
-              <th className="px-4 py-3 text-left font-extrabold">Categoria</th>
-              <th className="px-4 py-3 text-left font-extrabold">Data</th>
-              <th className="px-4 py-3 text-left font-extrabold">Tipo</th>
-              <th className="px-4 py-3 text-right font-extrabold">Valor</th>
-            </tr>
-          </thead>
-
-          <tbody className="text-fg">
-            {periodTx.map((t) => (
-              <tr key={t.id} className="border-t border-border/20">
-                <td className="px-4 py-3">{t.description}</td>
-                <td className="px-4 py-3 text-muted">{t.category ? t.category.title : "—"}</td>
-                <td className="px-4 py-3 text-muted">{isoToBR(t.date)}</td>
-                <td className="px-4 py-3">
-                  <span className="rounded-2xl border border-border/25 bg-card/45 px-2.5 py-1 text-[11px] font-bold text-muted">
-                    {t.type === "INCOME" ? "Entrada" : "Saída"}
+                  <span
+                    className={[
+                      "hidden sm:inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold",
+                      st.pillBg,
+                      st.pillText,
+                    ].join(" ")}
+                  >
+                    {catTitle}
                   </span>
-                </td>
-                <td className="px-4 py-3 text-right font-extrabold">{brlFromCents(t.amountCents)}</td>
-              </tr>
-            ))}
 
-            {periodTx.length === 0 && !txs.loading ? (
-              <tr className="border-t border-border/20">
-                <td className="px-4 py-6 text-muted" colSpan={5}>
-                  Nenhuma transação encontrada para este período.
-                </td>
-              </tr>
+                  <div className="flex items-center gap-3">
+                    <p
+                      className={[
+                        "text-sm font-semibold tabular-nums",
+                        isIncome ? "text-emerald-700" : "text-slate-700",
+                      ].join(" ")}
+                    >
+                      {amountText}
+                    </p>
+
+                    <span
+                      className={[
+                        "grid h-6 w-6 place-items-center rounded-full border",
+                        isIncome ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700",
+                      ].join(" ")}
+                      aria-hidden="true"
+                    >
+                      {isIncome ? (
+                        <ArrowUpRight className="h-3.5 w-3.5" />
+                      ) : (
+                        <ArrowDownRight className="h-3.5 w-3.5" />
+                      )}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+
+            {recentTx.length === 0 && !txs.loading ? (
+              <div className="px-5 py-10 text-center text-sm text-slate-500">
+                Nenhuma transação encontrada ainda.
+              </div>
             ) : null}
-          </tbody>
-        </table>
+          </div>
+
+          <div className="border-t border-slate-100 px-5 py-4">
+            <Link
+              to="/transactions"
+              className="mx-auto inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800"
+            >
+              <Plus className="h-4 w-4" />
+              Nova transação
+            </Link>
+          </div>
+        </div>
+
+        {/* Categories */}
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+            <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+              Categorias
+            </p>
+
+            <Link
+              to="/categories"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 hover:text-emerald-800"
+            >
+              Gerenciar <ChevronRight className="h-4 w-4" />
+            </Link>
+          </div>
+
+          <div className="divide-y divide-slate-100">
+            {categories.map((c) => {
+              const st = categoryStyle(c.title);
+              const itens = c.count === 1 ? "item" : "itens";
+
+              return (
+                <div key={c.title} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 px-5 py-4">
+                  <span
+                    className={[
+                      "inline-flex w-fit items-center rounded-full px-3 py-1 text-xs font-semibold",
+                      st.pillBg,
+                      st.pillText,
+                    ].join(" ")}
+                  >
+                    {c.title}
+                  </span>
+
+                  <span className="text-sm text-slate-500">
+                    {c.count} {itens}
+                  </span>
+
+                  <span className="text-sm font-semibold text-slate-900 tabular-nums">
+                    {brlFromCents(c.totalCents)}
+                  </span>
+                </div>
+              );
+            })}
+
+            {categories.length === 0 && !txs.loading ? (
+              <div className="px-5 py-10 text-center text-sm text-slate-500">
+                Nenhuma categoria com despesas ainda.
+              </div>
+            ) : null}
+          </div>
+        </div>
       </div>
     </div>
   );

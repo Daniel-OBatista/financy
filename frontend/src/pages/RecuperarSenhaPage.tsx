@@ -1,85 +1,69 @@
-import type { ReactElement, FormEvent } from "react";
+import type { ReactElement } from "react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Eye, EyeOff, Lock, Mail } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail, ArrowRight } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 
-type LoginFormState = {
+type FormState = {
   email: string;
   senha: string;
-  lembrar: boolean;
 };
 
-function mapAuthErrorMessage(raw: string): string {
-  const msg = raw.toLowerCase();
-
-  if (msg.includes("email not confirmed")) return "Seu e-mail ainda não foi confirmado.";
-  if (msg.includes("invalid login credentials")) return "E-mail ou senha inválidos.";
-  if (msg.includes("invalid")) return "Dados inválidos. Confira e tente novamente.";
-  if (msg.includes("rate limit")) return "Muitas tentativas. Aguarde um pouco e tente novamente.";
-
-  return raw;
-}
-
-export default function LoginPage(): ReactElement {
-  const { signIn } = useAuth();
+export default function RecuperarSenhaPage(): ReactElement {
+  const { resetPassword } = useAuth();
   const navigate = useNavigate();
 
   const [show, setShow] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
 
-  const [form, setForm] = useState<LoginFormState>({
-    email: "",
-    senha: "",
-    lembrar: false,
-  });
+  const [form, setForm] = useState<FormState>({ email: "", senha: "" });
 
-  async function handleLogin(): Promise<void> {
+  async function handleReset(): Promise<void> {
     setError(null);
+    setOk(null);
 
     const email = form.email.trim();
-    const password = form.senha;
+    const senha = form.senha;
 
-    if (!email || !password) {
-      setError("Preencha e-mail e senha.");
+    if (!email || !senha) {
+      setError("Preencha e-mail e a nova senha.");
       return;
     }
 
     setLoading(true);
 
     try {
-      await signIn({ email, password });
-      navigate("/dashboard", { replace: true });
+      await resetPassword({ email, newPassword: senha });
+      setOk("Senha atualizada! Agora você já pode fazer login.");
+      setTimeout(() => navigate("/login", { replace: true }), 700);
     } catch (err: unknown) {
-      // eslint-disable-next-line no-console
-      console.error("signIn error:", err);
-
-      const message = err instanceof Error ? err.message : "Falha ao entrar.";
-      setError(mapAuthErrorMessage(message));
+      const message = err instanceof Error ? err.message : "Falha ao atualizar senha.";
+      setError(message);
     } finally {
       setLoading(false);
     }
-  }
-
-  function onSubmit(e: FormEvent<HTMLFormElement>): void {
-    e.preventDefault();
-    void handleLogin();
   }
 
   return (
     <section className="w-full max-w-md">
       <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-sm">
         <div className="text-center">
-          <h1 className="text-lg font-semibold text-gray-900">Fazer login</h1>
-          <p className="mt-1 text-sm text-gray-500">Entre na sua conta para continuar</p>
+          <h1 className="text-lg font-semibold text-gray-900">Recuperar senha</h1>
+          <p className="mt-1 text-sm text-gray-500">Defina uma nova senha para sua conta</p>
         </div>
 
-        {/* ✅ FORM para Enter funcionar */}
-        <form onSubmit={onSubmit} className="mt-6 space-y-4">
+        <div className="mt-6 space-y-4">
           {error ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {error}
+            </div>
+          ) : null}
+
+          {ok ? (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              {ok}
             </div>
           ) : null}
 
@@ -99,15 +83,15 @@ export default function LoginPage(): ReactElement {
           </div>
 
           <div>
-            <label className="text-xs font-medium text-gray-700">Senha</label>
+            <label className="text-xs font-medium text-gray-700">Nova senha</label>
             <div className="relative mt-2">
               <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <input
                 value={form.senha}
                 onChange={(e) => setForm((s) => ({ ...s, senha: e.target.value }))}
                 type={show ? "text" : "password"}
-                autoComplete="current-password"
-                placeholder="Digite sua senha"
+                autoComplete="new-password"
+                placeholder="Digite a nova senha"
                 className="h-11 w-full rounded-xl border border-gray-200 bg-white pl-10 pr-10 text-sm outline-none focus:border-brand-base focus:ring-4 focus:ring-brand-base/10"
               />
               <button
@@ -119,38 +103,20 @@ export default function LoginPage(): ReactElement {
                 {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
+
+            <p className="mt-2 text-xs text-gray-500">A senha deve ter no mínimo 8 caracteres</p>
           </div>
 
-          <div className="flex items-center justify-between">
-            <label className="flex items-center gap-2 text-xs text-gray-600">
-              <input
-                type="checkbox"
-                checked={form.lembrar}
-                onChange={(e) => setForm((s) => ({ ...s, lembrar: e.target.checked }))}
-                className="h-4 w-4 rounded border-gray-300 accent-brand-base"
-              />
-              Lembrar-me
-            </label>
-
-            <button
-              type="button"
-              className="text-xs font-medium text-brand-base hover:text-brand-dark"
-              onClick={() => navigate("/recuperar-senha")}
-            >
-              Recuperar senha
-            </button>
-          </div>
-
-          {/* ✅ agora é submit -> Enter funciona */}
           <button
-            type="submit"
+            type="button"
+            onClick={() => void handleReset()}
             disabled={loading}
             className={[
               "inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-semibold text-white transition focus:outline-none focus:ring-4 focus:ring-brand-base/20",
               loading ? "cursor-not-allowed bg-gray-300" : "bg-brand-base hover:bg-brand-dark",
             ].join(" ")}
           >
-            {loading ? "Entrando..." : "Entrar"}
+            {loading ? "Salvando..." : "Salvar nova senha"}
           </button>
 
           <div className="flex items-center gap-3 py-1">
@@ -159,15 +125,14 @@ export default function LoginPage(): ReactElement {
             <div className="h-px flex-1 bg-gray-200" />
           </div>
 
-          <p className="text-center text-xs text-gray-500">Ainda não tem uma conta?</p>
-
           <Link
-            to="/criar-conta"
+            to="/login"
             className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white text-sm font-semibold text-gray-800 transition hover:bg-gray-50"
           >
-            Criar conta
+            <ArrowRight className="h-4 w-4" />
+            Voltar para login
           </Link>
-        </form>
+        </div>
       </div>
     </section>
   );

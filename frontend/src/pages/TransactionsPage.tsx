@@ -1,6 +1,24 @@
-import type { ReactElement } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { useMutation, useQuery } from "@apollo/client/react";
+import {
+  ArrowDownCircle,
+  ArrowUpCircle,
+  Briefcase,
+  Car,
+  CircleDollarSign,
+  Film,
+  Fuel,
+  Home,
+  Pencil,
+  Plus,
+  Search,
+  ShoppingCart,
+  Tag,
+  Trash2,
+  UtensilsCrossed,
+  Wallet,
+  type LucideIcon,
+} from "lucide-react";
 import Modal from "../components/Modal";
 import {
   type Category,
@@ -40,6 +58,177 @@ type UpdateTxVars = {
 
 type DeleteTxVars = { id: string };
 
+type TypeFilter = "ALL" | TransactionType;
+type PageToken = number | "…";
+
+function safeDateMs(isoLike: string): number {
+  const d =
+    /^\d{4}-\d{2}-\d{2}$/.test(isoLike) ? new Date(`${isoLike}T00:00:00`) : new Date(isoLike);
+  const ms = d.getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function ymFromIso(isoLike: string): string {
+  const d =
+    /^\d{4}-\d{2}-\d{2}$/.test(isoLike) ? new Date(`${isoLike}T00:00:00`) : new Date(isoLike);
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  const mm = String(m).padStart(2, "0");
+  return `${y}-${mm}`;
+}
+
+function formatPeriodLabel(ym: string): string {
+  const [y, m] = ym.split("-");
+  const year = Number(y);
+  const monthIdx = Number(m) - 1;
+  const d = new Date(year, monthIdx, 1);
+  const monthName = new Intl.DateTimeFormat("pt-BR", { month: "long" }).format(d);
+  const cap = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+  return `${cap} / ${year}`;
+}
+
+type CatVisual = {
+  Icon: LucideIcon;
+  iconWrapClass: string;
+  iconClass: string;
+  pillClass: string;
+};
+
+function normalizeKey(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+function getCategoryVisual(c?: Category | null): CatVisual {
+  const titleKey = c?.title ? normalizeKey(c.title) : "";
+  const iconKey = (c as { icon?: string } | null)?.icon
+    ? normalizeKey(String((c as { icon?: string }).icon))
+    : "";
+  const colorKey = (c as { color?: string } | null)?.color
+    ? normalizeKey(String((c as { color?: string }).color))
+    : "";
+
+  const colorMap: Record<string, { iconWrapClass: string; iconClass: string; pillClass: string }> = {
+    green: {
+      iconWrapClass: "bg-emerald-100",
+      iconClass: "text-emerald-700",
+      pillClass: "bg-emerald-100 text-emerald-700",
+    },
+    blue: {
+      iconWrapClass: "bg-sky-100",
+      iconClass: "text-sky-700",
+      pillClass: "bg-sky-100 text-sky-700",
+    },
+    purple: {
+      iconWrapClass: "bg-violet-100",
+      iconClass: "text-violet-700",
+      pillClass: "bg-violet-100 text-violet-700",
+    },
+    pink: {
+      iconWrapClass: "bg-pink-100",
+      iconClass: "text-pink-700",
+      pillClass: "bg-pink-100 text-pink-700",
+    },
+    orange: {
+      iconWrapClass: "bg-orange-100",
+      iconClass: "text-orange-700",
+      pillClass: "bg-orange-100 text-orange-700",
+    },
+    yellow: {
+      iconWrapClass: "bg-amber-100",
+      iconClass: "text-amber-800",
+      pillClass: "bg-amber-100 text-amber-800",
+    },
+    slate: {
+      iconWrapClass: "bg-slate-100",
+      iconClass: "text-slate-700",
+      pillClass: "bg-slate-100 text-slate-700",
+    },
+  };
+
+  const iconMap: Record<string, LucideIcon> = {
+    wallet: Wallet,
+    car: Car,
+    mercado: ShoppingCart,
+    market: ShoppingCart,
+    alimentacao: UtensilsCrossed,
+    food: UtensilsCrossed,
+    transporte: Car,
+    gasolina: Fuel,
+    fuel: Fuel,
+    utilidades: Home,
+    house: Home,
+    casa: Home,
+    aluguel: Home,
+    salario: Briefcase,
+    income: Briefcase,
+    investimento: Wallet,
+    invest: Wallet,
+    entretenimento: Film,
+    movie: Film,
+    tag: Tag,
+  };
+
+  const inferredIcon: LucideIcon =
+    iconMap[iconKey] ??
+    iconMap[titleKey] ??
+    (titleKey.includes("alimenta") ? UtensilsCrossed : undefined) ??
+    (titleKey.includes("transp") ? Car : undefined) ??
+    (titleKey.includes("merc") ? ShoppingCart : undefined) ??
+    (titleKey.includes("sal") ? Briefcase : undefined) ??
+    (titleKey.includes("util") || titleKey.includes("alugu") ? Home : undefined) ??
+    (titleKey.includes("inv") ? Wallet : undefined) ??
+    (titleKey.includes("cin") || titleKey.includes("entre") ? Film : undefined) ??
+    Tag;
+
+  const byTitle: Record<string, keyof typeof colorMap> = {
+    alimentacao: "blue",
+    transporte: "purple",
+    mercado: "orange",
+    investimento: "green",
+    utilidades: "yellow",
+    salario: "green",
+    entretenimento: "pink",
+  };
+
+  const pickColorKey: keyof typeof colorMap =
+    (colorKey && (colorKey as keyof typeof colorMap)) || byTitle[titleKey] || "slate";
+
+  const picked = colorMap[pickColorKey] ?? colorMap.slate;
+
+  return {
+    Icon: inferredIcon,
+    iconWrapClass: picked.iconWrapClass,
+    iconClass: picked.iconClass,
+    pillClass: picked.pillClass,
+  };
+}
+
+function buildPagination(current: number, totalPages: number): PageToken[] {
+  if (totalPages <= 1) return [1];
+
+  const tokens: PageToken[] = [];
+  const add = (v: PageToken): void => {
+    if (tokens.length === 0 || tokens[tokens.length - 1] !== v) tokens.push(v);
+  };
+
+  const windowSize = 1;
+  const start = Math.max(2, current - windowSize);
+  const end = Math.min(totalPages - 1, current + windowSize);
+
+  add(1);
+  if (start > 2) add("…");
+  for (let p = start; p <= end; p += 1) add(p);
+  if (end < totalPages - 1) add("…");
+  add(totalPages);
+
+  return tokens;
+}
+
 export default function TransactionsPage(): ReactElement {
   const cats = useQuery<GetCategoriesData>(GET_CATEGORIES);
   const txs = useQuery<GetTransactionsData>(GET_TRANSACTIONS);
@@ -59,29 +248,82 @@ export default function TransactionsPage(): ReactElement {
     { refetchQueries: [{ query: GET_TRANSACTIONS }] }
   );
 
+  // filtros
   const [q, setQ] = useState<string>("");
+  const [filterType, setFilterType] = useState<TypeFilter>("ALL");
+  const [filterCategoryId, setFilterCategoryId] = useState<string>("");
+  const [filterPeriod, setFilterPeriod] = useState<string>(""); // YYYY-MM
+  const [periodInitialized, setPeriodInitialized] = useState<boolean>(false);
+
+  // paginação
+  const pageSize = 10;
+  const [page, setPage] = useState<number>(1);
+
+  // modal
   const [open, setOpen] = useState<boolean>(false);
   const [edit, setEdit] = useState<Transaction | null>(null);
 
+  // form
   const [description, setDescription] = useState<string>("");
   const [date, setDate] = useState<string>(""); // YYYY-MM-DD
   const [type, setType] = useState<TransactionType>("EXPENSE");
   const [amount, setAmount] = useState<string>(""); // em reais
   const [categoryId, setCategoryId] = useState<string>("");
 
-  const list = useMemo(() => {
+  const periodOptions = useMemo(() => {
+    const all = txs.data?.transactions ?? [];
+    const set = new Set<string>();
+    for (const t of all) set.add(ymFromIso(t.date));
+    return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
+  }, [txs.data?.transactions]);
+
+  useEffect(() => {
+    if (periodInitialized) return;
+    if (periodOptions.length === 0) return;
+    setFilterPeriod(periodOptions[0]);
+    setPeriodInitialized(true);
+  }, [periodInitialized, periodOptions]);
+
+  const filtered = useMemo(() => {
     const all = txs.data?.transactions ?? [];
     const s = q.trim().toLowerCase();
-    if (!s) return all;
-    return all.filter((t) => t.description.toLowerCase().includes(s));
-  }, [txs.data?.transactions, q]);
 
-  const summary = useMemo(() => {
-    const all = txs.data?.transactions ?? [];
-    const income = all.filter((t) => t.type === "INCOME").reduce((acc, t) => acc + t.amountCents, 0);
-    const expense = all.filter((t) => t.type === "EXPENSE").reduce((acc, t) => acc + t.amountCents, 0);
-    return { income, expense, balance: income - expense };
-  }, [txs.data?.transactions]);
+    const out = all
+      .filter((t) => {
+        if (s && !t.description.toLowerCase().includes(s)) return false;
+        if (filterType !== "ALL" && t.type !== filterType) return false;
+
+        if (filterCategoryId.trim()) {
+          const cid = t.categoryId ?? "";
+          if (cid !== filterCategoryId.trim()) return false;
+        }
+
+        if (filterPeriod.trim()) {
+          if (ymFromIso(t.date) !== filterPeriod.trim()) return false;
+        }
+
+        return true;
+      })
+      .slice()
+      .sort((a, b) => safeDateMs(b.date) - safeDateMs(a.date));
+
+    return out;
+  }, [txs.data?.transactions, q, filterType, filterCategoryId, filterPeriod]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [q, filterType, filterCategoryId, filterPeriod]);
+
+  const total = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const startIdx = (safePage - 1) * pageSize;
+  const endIdxExclusive = Math.min(startIdx + pageSize, total);
+  const pageItems = filtered.slice(startIdx, endIdxExclusive);
+
+  useEffect(() => {
+    if (safePage !== page) setPage(safePage);
+  }, [page, safePage]);
 
   function resetForm(): void {
     setDescription("");
@@ -144,173 +386,358 @@ export default function TransactionsPage(): ReactElement {
     await deleteTx({ variables: { id } });
   }
 
+  const paginationTokens = useMemo(() => buildPagination(safePage, totalPages), [safePage, totalPages]);
+
+  const loading = txs.loading || cats.loading;
+  const errorMsg = (txs.error?.message ?? cats.error?.message) ?? null;
+
+  const isExpense = type === "EXPENSE";
+  const isIncome = type === "INCOME";
+
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h2 className="text-xl font-black tracking-tight">Transações</h2>
-          <p className="text-sm text-muted">Controle de entradas e saídas.</p>
+          <h2 className="text-2xl font-extrabold tracking-tight text-fg">Transações</h2>
+          <p className="mt-1 text-sm text-muted">Gerencie todas as suas transações financeiras</p>
         </div>
 
-        <div className="sm:ml-auto flex w-full gap-2 sm:w-auto">
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Buscar..."
-            className="w-full sm:w-72 rounded-2xl border border-border/25 bg-card/40 px-4 py-2.5 text-sm text-fg outline-none backdrop-blur focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
-          />
+        <button
+          onClick={openNew}
+          type="button"
+          className="inline-flex h-9 items-center justify-center gap-2 self-start rounded-lg bg-primary px-3 text-sm font-semibold text-primaryFg shadow-sm transition hover:brightness-110 active:scale-[0.99]"
+        >
+          <Plus className="h-4 w-4" />
+          Nova transação
+        </button>
+      </div>
 
-          <button
-            onClick={openNew}
-            className="rounded-2xl bg-primary px-4 py-2.5 text-sm font-extrabold text-primaryFg shadow-lg shadow-primary/15 transition hover:brightness-110"
-            type="button"
-          >
-            Nova
-          </button>
+      {/* Filtros */}
+      <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+        <div className="grid gap-4 md:grid-cols-4">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-fg">Buscar</label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Buscar por descrição"
+                className="h-11 w-full rounded-xl border border-border bg-bg pl-10 pr-3 text-sm text-fg outline-none transition focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-fg">Tipo</label>
+            <select
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value as TypeFilter)}
+              className="h-11 w-full rounded-xl border border-border bg-bg px-3 text-sm text-fg outline-none transition focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
+            >
+              <option value="ALL">Todos</option>
+              <option value="INCOME">Entrada</option>
+              <option value="EXPENSE">Saída</option>
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-fg">Categoria</label>
+            <select
+              value={filterCategoryId}
+              onChange={(e) => setFilterCategoryId(e.target.value)}
+              className="h-11 w-full rounded-xl border border-border bg-bg px-3 text-sm text-fg outline-none transition focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
+            >
+              <option value="">Todas</option>
+              {(cats.data?.categories ?? []).map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.title}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-fg">Período</label>
+            <select
+              value={filterPeriod}
+              onChange={(e) => setFilterPeriod(e.target.value)}
+              className="h-11 w-full rounded-xl border border-border bg-bg px-3 text-sm text-fg outline-none transition focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
+            >
+              {periodOptions.map((ym) => (
+                <option key={ym} value={ym}>
+                  {formatPeriodLabel(ym)}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-3xl border border-border/25 bg-card/35 p-4 backdrop-blur">
-          <p className="text-xs font-bold text-muted">Entradas</p>
-          <p className="mt-1 text-lg font-black text-emerald-300">{brlFromCents(summary.income)}</p>
-        </div>
-
-        <div className="rounded-3xl border border-border/25 bg-card/35 p-4 backdrop-blur">
-          <p className="text-xs font-bold text-muted">Saídas</p>
-          <p className="mt-1 text-lg font-black text-rose-300">{brlFromCents(summary.expense)}</p>
-        </div>
-
-        <div className="rounded-3xl border border-border/25 bg-card/35 p-4 backdrop-blur">
-          <p className="text-xs font-bold text-muted">Saldo</p>
-          <p className="mt-1 text-lg font-black text-fg">{brlFromCents(summary.balance)}</p>
-        </div>
-      </div>
-
-      {(txs.loading || cats.loading) && (
-        <div className="rounded-3xl border border-border/25 bg-card/30 p-4 text-sm text-muted">
+      {/* Loading / Error */}
+      {loading && (
+        <div className="rounded-2xl border border-border bg-card p-4 text-sm text-muted shadow-sm">
           Carregando...
         </div>
       )}
 
-      {(txs.error || cats.error) && (
-        <div className="rounded-3xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
-          Erro: {(txs.error?.message ?? cats.error?.message) ?? "desconhecido"}
+      {errorMsg && !loading && (
+        <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-700 shadow-sm">
+          Erro: {errorMsg}
         </div>
       )}
 
-      <div className="overflow-hidden rounded-3xl border border-border/25 bg-card/30 backdrop-blur">
-        <table className="w-full border-collapse text-sm">
-          <thead className="bg-card/50 text-muted">
-            <tr>
-              <th className="px-4 py-3 text-left font-extrabold">Descrição</th>
-              <th className="px-4 py-3 text-left font-extrabold">Categoria</th>
-              <th className="px-4 py-3 text-left font-extrabold">Data</th>
-              <th className="px-4 py-3 text-left font-extrabold">Tipo</th>
-              <th className="px-4 py-3 text-right font-extrabold">Valor</th>
-              <th className="px-4 py-3 text-right font-extrabold">Ações</th>
+      {/* Tabela */}
+      <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="text-left">
+              <th className="px-5 py-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Descrição</th>
+              <th className="px-5 py-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Data</th>
+              <th className="px-5 py-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Categoria</th>
+              <th className="px-5 py-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Tipo</th>
+              <th className="px-5 py-4 text-right text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Valor
+              </th>
+              <th className="px-5 py-4 text-right text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Ações
+              </th>
             </tr>
           </thead>
 
-          <tbody className="text-fg">
-            {list.map((t) => (
-              <tr key={t.id} className="border-t border-border/20">
-                <td className="px-4 py-3">{t.description}</td>
-                <td className="px-4 py-3 text-muted">{t.category ? t.category.title : "—"}</td>
-                <td className="px-4 py-3 text-muted">{isoToBR(t.date)}</td>
-                <td className="px-4 py-3">
-                  <span className="rounded-2xl border border-border/25 bg-card/45 px-2.5 py-1 text-[11px] font-bold text-muted">
-                    {t.type === "INCOME" ? "Entrada" : "Saída"}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-right font-extrabold">{brlFromCents(t.amountCents)}</td>
-                <td className="px-4 py-3">
-                  <div className="flex justify-end gap-2">
-                    <button
-                      onClick={() => openEdit(t)}
-                      className="rounded-2xl border border-border/25 bg-card/40 px-3 py-1.5 text-xs font-semibold text-fg transition hover:bg-card/60"
-                      type="button"
-                    >
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => onDelete(t.id)}
-                      disabled={deleting}
-                      className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-200 transition hover:bg-rose-500/15 disabled:opacity-60"
-                      type="button"
-                    >
-                      Excluir
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+          <tbody className="text-sm text-fg">
+            {pageItems.map((t) => {
+              const cat = t.category ?? null;
+              const vis = getCategoryVisual(cat);
+              const Icon = vis.Icon;
 
-            {list.length === 0 && !txs.loading ? (
-              <tr className="border-t border-border/20">
-                <td className="px-4 py-6 text-muted" colSpan={6}>
+              const rowIsIncome = t.type === "INCOME";
+              const TypeIcon = rowIsIncome ? ArrowUpCircle : ArrowDownCircle;
+
+              return (
+                <tr key={t.id} className="border-t border-border/70">
+                  <td className="px-5 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className={["flex h-9 w-9 items-center justify-center rounded-lg", vis.iconWrapClass].join(" ")}>
+                        <Icon className={["h-4 w-4", vis.iconClass].join(" ")} />
+                      </div>
+                      <span className="font-medium text-fg">{t.description}</span>
+                    </div>
+                  </td>
+
+                  <td className="px-5 py-4 text-muted">{isoToBR(t.date)}</td>
+
+                  <td className="px-5 py-4">
+                    {cat ? (
+                      <span className={["inline-flex items-center rounded-full px-3 py-1 text-xs font-medium", vis.pillClass].join(" ")}>
+                        {cat.title}
+                      </span>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
+                  </td>
+
+                  <td className="px-5 py-4">
+                    <span
+                      className={[
+                        "inline-flex items-center gap-2 text-xs font-medium",
+                        rowIsIncome ? "text-emerald-700" : "text-rose-700",
+                      ].join(" ")}
+                    >
+                      <TypeIcon className="h-4 w-4" />
+                      {rowIsIncome ? "Entrada" : "Saída"}
+                    </span>
+                  </td>
+
+                  <td className={["px-5 py-4 text-right font-semibold", rowIsIncome ? "text-emerald-700" : "text-fg"].join(" ")}>
+                    {rowIsIncome ? `+ ${brlFromCents(t.amountCents)}` : `- ${brlFromCents(t.amountCents)}`}
+                  </td>
+
+                  <td className="px-5 py-4">
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onClick={() => onDelete(t.id)}
+                        disabled={deleting}
+                        type="button"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-bg text-rose-600 transition hover:bg-rose-500/10 disabled:opacity-60"
+                        aria-label="Excluir"
+                        title="Excluir"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+
+                      <button
+                        onClick={() => openEdit(t)}
+                        type="button"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-bg text-muted transition hover:bg-card"
+                        aria-label="Editar"
+                        title="Editar"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+
+            {pageItems.length === 0 && !loading ? (
+              <tr className="border-t border-border/70">
+                <td colSpan={6} className="px-5 py-10 text-center text-sm text-muted">
                   Nenhuma transação encontrada.
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
+
+        {/* Rodapé: resultados + paginação */}
+        <div className="flex flex-col gap-3 border-t border-border/70 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-muted">
+            {total === 0 ? "0 a 0" : `${startIdx + 1} a ${endIdxExclusive}`} | {total} resultados
+          </p>
+
+          <div className="flex items-center justify-end gap-1">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={safePage <= 1}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-bg text-muted transition hover:bg-card disabled:opacity-50"
+              aria-label="Página anterior"
+              title="Anterior"
+            >
+              ‹
+            </button>
+
+            {paginationTokens.map((tok, idx) => {
+              if (tok === "…") {
+                return (
+                  <span key={`dots-${idx}`} className="px-2 text-sm text-muted">
+                    …
+                  </span>
+                );
+              }
+
+              const n = tok;
+              const active = n === safePage;
+
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setPage(n)}
+                  className={[
+                    "inline-flex h-8 min-w-8 items-center justify-center rounded-lg border px-2 text-sm font-medium transition",
+                    active ? "border-primary bg-primary text-primaryFg" : "border-border bg-bg text-muted hover:bg-card",
+                  ].join(" ")}
+                >
+                  {n}
+                </button>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safePage >= totalPages}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-bg text-muted transition hover:bg-card disabled:opacity-50"
+              aria-label="Próxima página"
+              title="Próxima"
+            >
+              ›
+            </button>
+          </div>
+        </div>
       </div>
 
-      <Modal open={open} title={edit ? "Editar transação" : "Nova transação"} onClose={() => setOpen(false)}>
-        <div className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
+      {/* Modal */}
+      <Modal
+        open={open}
+        title={edit ? "Editar transação" : "Nova transação"}
+        subtitle="Registre sua despesa ou receita"
+        onClose={() => setOpen(false)}
+      >
+        <div className="space-y-4">
+
+          {/* Tipo (Despesa/Receita) - tamanho igual ao Figma */}
+          <div className="w-full rounded-xl border border-border bg-bg p-[7px]">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setType("EXPENSE")}
+                className={[
+                  "inline-flex h-[46px] w-full items-center justify-center gap-2 rounded-lg border text-sm font-semibold transition",
+                  isExpense
+                    ? "border-rose-300 bg-rose-50 text-rose-700"
+                    : "border-transparent bg-transparent text-muted hover:bg-card/60 hover:text-fg",
+                ].join(" ")}
+              >
+                <ArrowDownCircle className={["h-4 w-4", isExpense ? "text-rose-600" : "text-muted"].join(" ")} />
+                Despesa
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setType("INCOME")}
+                className={[
+                  "inline-flex h-[46px] w-full items-center justify-center gap-2 rounded-lg border text-sm font-semibold transition",
+                  isIncome
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                    : "border-transparent bg-transparent text-muted hover:bg-card/60 hover:text-fg",
+                ].join(" ")}
+              >
+                <ArrowUpCircle className={["h-4 w-4", isIncome ? "text-emerald-600" : "text-muted"].join(" ")} />
+                Receita
+              </button>
+            </div>
+          </div>
+          {/* Campos */}
+          <div className="space-y-3">
             <div className="space-y-1">
-              <label className="text-xs font-bold text-muted">Descrição</label>
+              <label className="text-xs font-semibold text-fg">Descrição</label>
               <input
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full rounded-2xl border border-border/25 bg-card/40 px-4 py-2.5 text-sm text-fg outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
+                placeholder="Ex. Almoço no restaurante"
+                className="h-11 w-full rounded-xl border border-border bg-bg px-3 text-sm text-fg outline-none transition placeholder:text-muted focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
               />
             </div>
 
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-muted">Data</label>
-              <input
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                type="date"
-                className="w-full rounded-2xl border border-border/25 bg-card/40 px-4 py-2.5 text-sm text-fg outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
-              />
-            </div>
-          </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-fg">Data</label>
+                <input
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  type="date"
+                  className="h-11 w-full rounded-xl border border-border bg-bg px-3 text-sm text-fg outline-none transition focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
+                />
+              </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-muted">Tipo</label>
-              <select
-                value={type}
-                onChange={(e) => setType(e.target.value as TransactionType)}
-                className="w-full rounded-2xl border border-border/25 bg-card/40 px-4 py-2.5 text-sm text-fg outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
-              >
-                <option value="INCOME">Entrada</option>
-                <option value="EXPENSE">Saída</option>
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-muted">Valor (R$)</label>
-              <input
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0,00"
-                className="w-full rounded-2xl border border-border/25 bg-card/40 px-4 py-2.5 text-sm text-fg outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
-              />
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-fg">Valor</label>
+                <div className="flex h-11 items-center rounded-xl border border-border bg-bg px-3 transition focus-within:border-primary/50 focus-within:ring-4 focus-within:ring-primary/10">
+                  <span className="mr-2 inline-flex items-center text-sm text-muted">R$</span>
+                  <input
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    placeholder="0,00"
+                    inputMode="decimal"
+                    className="h-full w-full bg-transparent text-sm text-fg outline-none placeholder:text-muted"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-bold text-muted">Categoria</label>
+              <label className="text-xs font-semibold text-fg">Categoria</label>
               <select
                 value={categoryId}
                 onChange={(e) => setCategoryId(e.target.value)}
-                className="w-full rounded-2xl border border-border/25 bg-card/40 px-4 py-2.5 text-sm text-fg outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
+                className="h-11 w-full rounded-xl border border-border bg-bg px-3 text-sm text-fg outline-none transition focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
               >
-                <option value="">Sem categoria</option>
+                <option value="">Selecione</option>
                 {(cats.data?.categories ?? []).map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.title}
@@ -320,10 +747,11 @@ export default function TransactionsPage(): ReactElement {
             </div>
           </div>
 
+          {/* Botão salvar (igual imagem) */}
           <button
             onClick={onSubmit}
             disabled={creating || updating}
-            className="w-full rounded-2xl bg-primary px-4 py-2.5 text-sm font-extrabold text-primaryFg shadow-lg shadow-primary/15 transition hover:brightness-110 disabled:opacity-60"
+            className="inline-flex h-12 w-full items-center justify-center rounded-xl bg-primary px-4 text-sm font-semibold text-primaryFg shadow-sm transition hover:brightness-110 disabled:opacity-60"
             type="button"
           >
             {creating || updating ? "Salvando..." : "Salvar"}
