@@ -1,0 +1,87 @@
+@import "tailwindcss";
+/* Se você ainda usa tailwind.config.* (modo “legacy”), descomente:
+@config "./tailwind.config.ts";
+*/
+
+/* ✅ Tokens do tema (geram bg-financy-bg, border-financy-border, rounded-financy, shadow-financySm...) */
+@theme {
+  /* Colors */
+  --color-financy-bg: #f1f5f9;             /* slate-100 */
+  --color-financy-border: #e2e8f0;         /* slate-200 */
+  --color-financy-primary: #2f855a;        /* green-700 */
+  --color-financy-primaryHover: #276749;   /* green-800 */
+
+  /* Radius */
+  --radius-financy: 18px;
+
+  /* Shadow */
+  --shadow-financySm: 0 10px 25px rgba(15, 23, 42, 0.08);
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-financy-bg text-slate-800 antialiased;
+  }
+
+  ::selection {
+    background: rgba(47, 133, 90, 0.18);
+  }
+}
+
+@layer components {
+  .financy-card {
+    @apply rounded-financy border border-financy-border bg-white shadow-financySm;
+  }
+
+  .financy-input {
+    @apply h-11 w-full rounded-xl border border-financy-border bg-white px-11 text-sm outline-none placeholder:text-slate-400
+    focus:border-emerald-600 focus:ring-4 focus:ring-[rgba(47,133,90,0.18)];
+  }
+
+  .financy-input-label {
+    @apply text-xs font-medium text-slate-600;
+  }
+
+  /* ✅ Base compartilhada (sem @apply em classe custom) */
+  .financy-btn,
+  .financy-btn-primary,
+  .financy-btn-outline {
+    @apply inline-flex h-11 items-center justify-center rounded-xl px-4 text-sm font-semibold transition
+    focus:outline-none focus:ring-4 focus:ring-[rgba(47,133,90,0.18)] disabled:opacity-60;
+  }
+
+  .financy-btn-primary {
+    @apply bg-financy-primary text-white shadow-financySm hover:bg-financy-primaryHover;
+  }
+
+  .financy-btn-outline {
+    @apply border border-financy-border bg-white text-slate-700 hover:bg-slate-50;
+  }
+
+  .financy-divider {
+    @apply flex items-center gap-3 text-xs text-slate-400;
+  }
+
+  .financy-divider::before,
+  .financy-divider::after {
+    content: "";
+    @apply h-px flex-1 bg-financy-border;
+  }
+
+  .financy-page {
+    @apply mx-auto w-full max-w-6xl px-4 pb-10 pt-8;
+  }
+
+  .financy-h1 {
+    @apply text-2xl font-extrabold tracking-tight text-slate-900;
+  }
+
+  .financy-subtitle {
+    @apply mt-1 text-sm text-slate-500;
+  }
+}
