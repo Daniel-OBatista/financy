@@ -1,9 +1,11 @@
 import { GraphQLError } from "graphql";
 import type { GraphQLContext } from "./context.js";
-import { TransactionType as PrismaTxEnum } from "@prisma/client";
-import type { Prisma, TransactionType as PrismaTransactionType } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 
 type TransactionTypeGQL = "INCOME" | "EXPENSE";
+
+// Como seu banco guarda STRING, aceitamos ambos (compatibilidade)
+type DbTransactionType = "INCOME" | "EXPENSE" | "ENTRADA" | "SAIDA";
 
 type CategoryInput = {
   title: string;
@@ -48,24 +50,17 @@ function iso(d: Date): string {
 }
 
 /**
- * ✅ Detecta se o Prisma enum tem INCOME/EXPENSE ou ENTRADA/SAIDA.
- * Isso evita erro de type em "type: args.input.type".
+ * ✅ Como no Prisma o campo é String, nós escolhemos o padrão do DB.
+ * Aqui vamos SALVAR "INCOME"/"EXPENSE" no banco (mais simples e bate com o GraphQL).
+ * Se você já tiver dados antigos em "ENTRADA"/"SAIDA", a leitura abaixo aceita.
  */
-function prismaUsesIncomeExpense(): boolean {
-  return Object.prototype.hasOwnProperty.call(PrismaTxEnum, "INCOME");
+function gqlToDbTxType(v: TransactionTypeGQL): DbTransactionType {
+  return v; // salva INCOME/EXPENSE
 }
 
-function gqlToPrismaTxType(v: TransactionTypeGQL): PrismaTransactionType {
-  if (prismaUsesIncomeExpense()) {
-    return v as unknown as PrismaTransactionType;
-  }
-  // Prisma antigo: ENTRADA/SAIDA
-  const mapped = v === "INCOME" ? "ENTRADA" : "SAIDA";
-  return mapped as unknown as PrismaTransactionType;
-}
+function dbToGqlTxType(v: string): TransactionTypeGQL {
+  const raw = String(v).toUpperCase();
 
-function prismaToGqlTxType(v: PrismaTransactionType): TransactionTypeGQL {
-  const raw = v as unknown as string;
   if (raw === "INCOME" || raw === "ENTRADA") return "INCOME";
   if (raw === "EXPENSE" || raw === "SAIDA") return "EXPENSE";
 
@@ -241,7 +236,7 @@ export const resolvers = {
       });
 
       return rows.map((t) => {
-        const safeType = prismaToGqlTxType(t.type);
+        const safeType = dbToGqlTxType(t.type);
 
         return {
           id: t.id,
@@ -318,7 +313,11 @@ export const resolvers = {
       };
     },
 
-    async createCategory(_: unknown, args: { input: CategoryInput }, ctx: GraphQLContext): Promise<GqlCategory> {
+    async createCategory(
+      _: unknown,
+      args: { input: CategoryInput },
+      ctx: GraphQLContext
+    ): Promise<GqlCategory> {
       const userId = requireUserId(ctx);
       await ensureUser(ctx, userId);
 
@@ -445,14 +444,14 @@ export const resolvers = {
           userId,
           description,
           date: args.input.date,
-          type: gqlToPrismaTxType(args.input.type),
+          type: gqlToDbTxType(args.input.type), // <- string no DB
           amountCents: cents,
           categoryId: args.input.categoryId ?? null,
         },
         include: { category: true },
       });
 
-      const safeType = prismaToGqlTxType(created.type);
+      const safeType = dbToGqlTxType(created.type);
 
       return {
         id: created.id,
@@ -519,14 +518,14 @@ export const resolvers = {
         data: {
           description,
           date: args.input.date,
-          type: gqlToPrismaTxType(args.input.type),
+          type: gqlToDbTxType(args.input.type),
           amountCents: cents,
           categoryId: args.input.categoryId ?? null,
         },
         include: { category: true },
       });
 
-      const safeType = prismaToGqlTxType(updated.type);
+      const safeType = dbToGqlTxType(updated.type);
 
       return {
         id: updated.id,
