@@ -5,7 +5,6 @@ import {
   ArrowUpCircle,
   Briefcase,
   Car,
-  CircleDollarSign,
   Film,
   Fuel,
   Home,
@@ -46,12 +45,12 @@ type CreateTxVars = {
 };
 
 type UpdateTxVars = {
+  id: string;
   input: {
-    id: string;
-    description?: string;
-    date?: string;
-    type?: TransactionType;
-    amountCents?: number;
+    description: string;
+    date: string;
+    type: TransactionType;
+    amountCents: number;
     categoryId?: string | null;
   };
 };
@@ -105,12 +104,8 @@ function normalizeKey(s: string): string {
 
 function getCategoryVisual(c?: Category | null): CatVisual {
   const titleKey = c?.title ? normalizeKey(c.title) : "";
-  const iconKey = (c as { icon?: string } | null)?.icon
-    ? normalizeKey(String((c as { icon?: string }).icon))
-    : "";
-  const colorKey = (c as { color?: string } | null)?.color
-    ? normalizeKey(String((c as { color?: string }).color))
-    : "";
+  const iconKey = c?.icon ? normalizeKey(String(c.icon)) : "";
+  const colorKey = c?.color ? normalizeKey(String(c.color)) : "";
 
   const colorMap: Record<string, { iconWrapClass: string; iconClass: string; pillClass: string }> = {
     green: {
@@ -233,20 +228,26 @@ export default function TransactionsPage(): ReactElement {
   const cats = useQuery<GetCategoriesData>(GET_CATEGORIES);
   const txs = useQuery<GetTransactionsData>(GET_TRANSACTIONS);
 
-  const [createTx, { loading: creating }] = useMutation<{ createTransaction: Transaction }, CreateTxVars>(
-    CREATE_TRANSACTION,
-    { refetchQueries: [{ query: GET_TRANSACTIONS }] }
-  );
+  const [createTx, { loading: creating }] = useMutation<
+    { createTransaction: Transaction },
+    CreateTxVars
+  >(CREATE_TRANSACTION, {
+    refetchQueries: [{ query: GET_TRANSACTIONS }],
+  });
 
-  const [updateTx, { loading: updating }] = useMutation<{ updateTransaction: Transaction }, UpdateTxVars>(
-    UPDATE_TRANSACTION,
-    { refetchQueries: [{ query: GET_TRANSACTIONS }] }
-  );
+  const [updateTx, { loading: updating }] = useMutation<
+    { updateTransaction: Transaction },
+    UpdateTxVars
+  >(UPDATE_TRANSACTION, {
+    refetchQueries: [{ query: GET_TRANSACTIONS }],
+  });
 
-  const [deleteTx, { loading: deleting }] = useMutation<{ deleteTransaction: boolean }, DeleteTxVars>(
-    DELETE_TRANSACTION,
-    { refetchQueries: [{ query: GET_TRANSACTIONS }] }
-  );
+  const [deleteTx, { loading: deleting }] = useMutation<
+    { deleteTransaction: boolean },
+    DeleteTxVars
+  >(DELETE_TRANSACTION, {
+    refetchQueries: [{ query: GET_TRANSACTIONS }],
+  });
 
   // filtros
   const [q, setQ] = useState<string>("");
@@ -368,7 +369,10 @@ export default function TransactionsPage(): ReactElement {
 
     if (edit) {
       await updateTx({
-        variables: { input: { id: edit.id, description: desc, date, type, amountCents: cents, categoryId: cat } },
+        variables: {
+          id: edit.id,
+          input: { description: desc, date, type, amountCents: cents, categoryId: cat },
+        },
       });
     } else {
       await createTx({
@@ -493,10 +497,18 @@ export default function TransactionsPage(): ReactElement {
         <table className="w-full border-collapse">
           <thead>
             <tr className="text-left">
-              <th className="px-5 py-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Descrição</th>
-              <th className="px-5 py-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Data</th>
-              <th className="px-5 py-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Categoria</th>
-              <th className="px-5 py-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Tipo</th>
+              <th className="px-5 py-4 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Descrição
+              </th>
+              <th className="px-5 py-4 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Data
+              </th>
+              <th className="px-5 py-4 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Categoria
+              </th>
+              <th className="px-5 py-4 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Tipo
+              </th>
               <th className="px-5 py-4 text-right text-[11px] font-semibold uppercase tracking-wide text-muted">
                 Valor
               </th>
@@ -519,7 +531,12 @@ export default function TransactionsPage(): ReactElement {
                 <tr key={t.id} className="border-t border-border/70">
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-3">
-                      <div className={["flex h-9 w-9 items-center justify-center rounded-lg", vis.iconWrapClass].join(" ")}>
+                      <div
+                        className={[
+                          "flex h-9 w-9 items-center justify-center rounded-lg",
+                          vis.iconWrapClass,
+                        ].join(" ")}
+                      >
                         <Icon className={["h-4 w-4", vis.iconClass].join(" ")} />
                       </div>
                       <span className="font-medium text-fg">{t.description}</span>
@@ -530,7 +547,12 @@ export default function TransactionsPage(): ReactElement {
 
                   <td className="px-5 py-4">
                     {cat ? (
-                      <span className={["inline-flex items-center rounded-full px-3 py-1 text-xs font-medium", vis.pillClass].join(" ")}>
+                      <span
+                        className={[
+                          "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium",
+                          vis.pillClass,
+                        ].join(" ")}
+                      >
                         {cat.title}
                       </span>
                     ) : (
@@ -550,8 +572,15 @@ export default function TransactionsPage(): ReactElement {
                     </span>
                   </td>
 
-                  <td className={["px-5 py-4 text-right font-semibold", rowIsIncome ? "text-emerald-700" : "text-fg"].join(" ")}>
-                    {rowIsIncome ? `+ ${brlFromCents(t.amountCents)}` : `- ${brlFromCents(t.amountCents)}`}
+                  <td
+                    className={[
+                      "px-5 py-4 text-right font-semibold",
+                      rowIsIncome ? "text-emerald-700" : "text-fg",
+                    ].join(" ")}
+                  >
+                    {rowIsIncome
+                      ? `+ ${brlFromCents(t.amountCents)}`
+                      : `- ${brlFromCents(t.amountCents)}`}
                   </td>
 
                   <td className="px-5 py-4">
@@ -629,7 +658,9 @@ export default function TransactionsPage(): ReactElement {
                   onClick={() => setPage(n)}
                   className={[
                     "inline-flex h-8 min-w-8 items-center justify-center rounded-lg border px-2 text-sm font-medium transition",
-                    active ? "border-primary bg-primary text-primaryFg" : "border-border bg-bg text-muted hover:bg-card",
+                    active
+                      ? "border-primary bg-primary text-primaryFg"
+                      : "border-border bg-bg text-muted hover:bg-card",
                   ].join(" ")}
                 >
                   {n}
@@ -659,8 +690,7 @@ export default function TransactionsPage(): ReactElement {
         onClose={() => setOpen(false)}
       >
         <div className="space-y-4">
-
-          {/* Tipo (Despesa/Receita) - tamanho igual ao Figma */}
+          {/* Tipo (Despesa/Receita) */}
           <div className="w-full rounded-xl border border-border bg-bg p-[7px]">
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -692,6 +722,7 @@ export default function TransactionsPage(): ReactElement {
               </button>
             </div>
           </div>
+
           {/* Campos */}
           <div className="space-y-3">
             <div className="space-y-1">
@@ -747,7 +778,7 @@ export default function TransactionsPage(): ReactElement {
             </div>
           </div>
 
-          {/* Botão salvar (igual imagem) */}
+          {/* Botão salvar */}
           <button
             onClick={onSubmit}
             disabled={creating || updating}

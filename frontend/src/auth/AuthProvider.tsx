@@ -22,6 +22,10 @@ type ResetPasswordPayload = {
   newPassword: string;
 };
 
+type UpdateProfilePayload = {
+  name: string;
+};
+
 type AuthContextValue = {
   user: AuthUser | null;
   token: string | null;
@@ -29,6 +33,8 @@ type AuthContextValue = {
   signIn: (payload: SignInPayload) => Promise<void>;
   signUp: (payload: SignUpPayload) => Promise<void>;
   resetPassword: (payload: ResetPasswordPayload) => Promise<void>;
+  updateProfile: (payload: UpdateProfilePayload) => Promise<void>;
+  refreshUser: () => Promise<void>;
   signOut: () => void;
 };
 
@@ -37,6 +43,7 @@ type AuthProviderProps = {
 };
 
 type StoredUser = {
+  id: string; // ✅ UUID que será o "userId" do backend
   email: string;
   password: string; // ✅ local-dev somente
   name: string;
@@ -52,6 +59,28 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 function normalizeEmail(input: string): string {
   return input.trim().toLowerCase();
+}
+
+function uuidV4(): string {
+  const cryptoObj = globalThis.crypto;
+  if (cryptoObj?.getRandomValues) {
+    const buf = new Uint8Array(16);
+    cryptoObj.getRandomValues(buf);
+
+    // version 4
+    buf[6] = (buf[6] & 0x0f) | 0x40;
+    // variant 10
+    buf[8] = (buf[8] & 0x3f) | 0x80;
+
+    const hex = Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  // fallback (ainda gera formato UUID)
+  const rnd = (): string => Math.floor((1 + Math.random()) * 0x10000).toString(16).slice(1);
+  return `${rnd()}${rnd()}-${rnd()}-4${rnd().slice(1)}-${((8 + Math.random() * 4) | 0).toString(16)}${rnd().slice(
+    1
+  )}-${rnd()}${rnd()}${rnd()}`;
 }
 
 function loadUsers(): StoredUser[] {
@@ -70,8 +99,15 @@ function saveUsers(users: StoredUser[]): void {
   localStorage.setItem(AUTH_USERS_KEY, JSON.stringify(users));
 }
 
-function createFakeToken(email: string): string {
-  return `dev_${btoa(`${email}:${Date.now()}`)}`;
+function readSessionFromStorage(): { token: string | null; user: AuthUser | null } {
+  const t = localStorage.getItem(AUTH_TOKEN_KEY);
+  const e = localStorage.getItem(AUTH_EMAIL_KEY);
+  const n = localStorage.getItem(AUTH_NAME_KEY);
+
+  if (t && e) {
+    return { token: t, user: { email: e, name: n ?? undefined } };
+  }
+  return { token: null, user: null };
 }
 
 export function AuthProvider({ children }: AuthProviderProps): ReactElement {
@@ -79,15 +115,16 @@ export function AuthProvider({ children }: AuthProviderProps): ReactElement {
   const [user, setUser] = useState<AuthUser | null>(null);
 
   useEffect(() => {
-    const t = localStorage.getItem(AUTH_TOKEN_KEY);
-    const e = localStorage.getItem(AUTH_EMAIL_KEY);
-    const n = localStorage.getItem(AUTH_NAME_KEY);
-
-    if (t && e) {
-      setToken(t);
-      setUser({ email: e, name: n ?? undefined });
-    }
+    const session = readSessionFromStorage();
+    setToken(session.token);
+    setUser(session.user);
   }, []);
+
+  async function refreshUser(): Promise<void> {
+    const session = readSessionFromStorage();
+    setToken(session.token);
+    setUser(session.user);
+  }
 
   async function signUp(payload: SignUpPayload): Promise<void> {
     const name = payload.name.trim();
@@ -102,7 +139,10 @@ export function AuthProvider({ children }: AuthProviderProps): ReactElement {
     const alreadyExists = users.some((u) => normalizeEmail(u.email) === email);
     if (alreadyExists) throw new Error("Este e-mail já está cadastrado. Faça login.");
 
+    const userId = uuidV4();
+
     const newUser: StoredUser = {
+      id: userId,
       email,
       password,
       name,
@@ -111,12 +151,12 @@ export function AuthProvider({ children }: AuthProviderProps): ReactElement {
 
     saveUsers([newUser, ...users]);
 
-    const fakeToken = createFakeToken(email);
-    localStorage.setItem(AUTH_TOKEN_KEY, fakeToken);
+    // ✅ token agora é o userId (UUID)
+    localStorage.setItem(AUTH_TOKEN_KEY, userId);
     localStorage.setItem(AUTH_EMAIL_KEY, email);
     localStorage.setItem(AUTH_NAME_KEY, name);
 
-    setToken(fakeToken);
+    setToken(userId);
     setUser({ email, name });
   }
 
@@ -135,12 +175,23 @@ export function AuthProvider({ children }: AuthProviderProps): ReactElement {
       throw new Error("E-mail ou senha inválidos.");
     }
 
-    const fakeToken = createFakeToken(email);
-    localStorage.setItem(AUTH_TOKEN_KEY, fakeToken);
+    // ✅ se for usuário antigo sem id, cria um agora e atualiza a base
+    let userId = found.id;
+    if (!userId) {
+      userId = uuidV4();
+      const idx = users.findIndex((u) => normalizeEmail(u.email) === email);
+      if (idx >= 0) {
+        const next = [...users];
+        next[idx] = { ...next[idx], id: userId };
+        saveUsers(next);
+      }
+    }
+
+    localStorage.setItem(AUTH_TOKEN_KEY, userId);
     localStorage.setItem(AUTH_EMAIL_KEY, email);
     localStorage.setItem(AUTH_NAME_KEY, found.name);
 
-    setToken(fakeToken);
+    setToken(userId);
     setUser({ email, name: found.name });
   }
 
@@ -154,14 +205,37 @@ export function AuthProvider({ children }: AuthProviderProps): ReactElement {
     const users = loadUsers();
     const idx = users.findIndex((u) => normalizeEmail(u.email) === email);
 
-    if (idx < 0) {
-      throw new Error("E-mail não encontrado.");
-    }
+    if (idx < 0) throw new Error("E-mail não encontrado.");
 
     const updated: StoredUser = { ...users[idx], password: newPassword };
     const next = [...users];
     next[idx] = updated;
     saveUsers(next);
+  }
+
+  async function updateProfile(payload: UpdateProfilePayload): Promise<void> {
+    const trimmed = payload.name.trim();
+    if (trimmed.length < 2) throw new Error("Nome inválido.");
+
+    const current = readSessionFromStorage();
+    if (!current.user?.email) throw new Error("Não autenticado.");
+
+    const email = normalizeEmail(current.user.email);
+
+    // ✅ atualiza lista local
+    const users = loadUsers();
+    const idx = users.findIndex((u) => normalizeEmail(u.email) === email);
+    if (idx >= 0) {
+      const updated: StoredUser = { ...users[idx], name: trimmed };
+      const next = [...users];
+      next[idx] = updated;
+      saveUsers(next);
+    }
+
+    // ✅ atualiza sessão
+    localStorage.setItem(AUTH_NAME_KEY, trimmed);
+
+    setUser({ email, name: trimmed });
   }
 
   function signOut(): void {
@@ -180,6 +254,8 @@ export function AuthProvider({ children }: AuthProviderProps): ReactElement {
       signIn,
       signUp,
       resetPassword,
+      updateProfile,
+      refreshUser,
       signOut,
     };
   }, [token, user]);

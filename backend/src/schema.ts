@@ -1,7 +1,9 @@
 import { GraphQLError } from "graphql";
 import type { GraphQLContext } from "./context.js";
+import { TransactionType as PrismaTxEnum } from "@prisma/client";
+import type { Prisma, TransactionType as PrismaTransactionType } from "@prisma/client";
 
-type TransactionTypeGQL = "ENTRADA" | "SAIDA";
+type TransactionTypeGQL = "INCOME" | "EXPENSE";
 
 type CategoryInput = {
   title: string;
@@ -13,8 +15,9 @@ type CategoryInput = {
 type TransactionInput = {
   description: string;
   date: string; // YYYY-MM-DD
-  type: TransactionTypeGQL; // ✅ agora vem do enum GraphQL
-  amount: number; // ex: 12.50
+  type: TransactionTypeGQL;
+  amount?: number | null; // opcional (reais)
+  amountCents?: number | null; // preferido pelo frontend
   categoryId?: string | null;
 };
 
@@ -27,6 +30,14 @@ function requireUserId(ctx: GraphQLContext): string {
   return ctx.userId;
 }
 
+async function ensureUser(ctx: GraphQLContext, userId: string): Promise<void> {
+  await ctx.prisma.user.upsert({
+    where: { id: userId },
+    update: {},
+    create: { id: userId, name: "Conta" },
+  });
+}
+
 function toCents(amount: number): number {
   if (!Number.isFinite(amount)) return NaN;
   return Math.round(amount * 100);
@@ -36,21 +47,37 @@ function iso(d: Date): string {
   return d.toISOString();
 }
 
-function isTxType(v: unknown): v is TransactionTypeGQL {
-  return v === "ENTRADA" || v === "SAIDA";
+/**
+ * ✅ Detecta se o Prisma enum tem INCOME/EXPENSE ou ENTRADA/SAIDA.
+ * Isso evita erro de type em "type: args.input.type".
+ */
+function prismaUsesIncomeExpense(): boolean {
+  return Object.prototype.hasOwnProperty.call(PrismaTxEnum, "INCOME");
 }
 
-function assertTxType(v: unknown): TransactionTypeGQL {
-  if (isTxType(v)) return v;
-  throw new GraphQLError("Tipo inválido (use ENTRADA ou SAIDA)", {
-    extensions: { code: "BAD_USER_INPUT" },
+function gqlToPrismaTxType(v: TransactionTypeGQL): PrismaTransactionType {
+  if (prismaUsesIncomeExpense()) {
+    return v as unknown as PrismaTransactionType;
+  }
+  // Prisma antigo: ENTRADA/SAIDA
+  const mapped = v === "INCOME" ? "ENTRADA" : "SAIDA";
+  return mapped as unknown as PrismaTransactionType;
+}
+
+function prismaToGqlTxType(v: PrismaTransactionType): TransactionTypeGQL {
+  const raw = v as unknown as string;
+  if (raw === "INCOME" || raw === "ENTRADA") return "INCOME";
+  if (raw === "EXPENSE" || raw === "SAIDA") return "EXPENSE";
+
+  throw new GraphQLError("Tipo inválido no banco (esperado INCOME/EXPENSE ou ENTRADA/SAIDA)", {
+    extensions: { code: "INTERNAL_SERVER_ERROR" },
   });
 }
 
 export const typeDefs = /* GraphQL */ `
   enum TransactionType {
-    ENTRADA
-    SAIDA
+    INCOME
+    EXPENSE
   }
 
   type User {
@@ -73,10 +100,11 @@ export const typeDefs = /* GraphQL */ `
   type Transaction {
     id: ID!
     description: String!
-    date: String!
     type: TransactionType!
-    amount: Float!
+    date: String!
     amountCents: Int!
+    amount: Float!
+    categoryId: ID
     category: Category
     createdAt: String!
     updatedAt: String!
@@ -98,7 +126,8 @@ export const typeDefs = /* GraphQL */ `
     description: String!
     date: String!
     type: TransactionType!
-    amount: Float!
+    amount: Float
+    amountCents: Int
     categoryId: ID
   }
 
@@ -143,12 +172,16 @@ type GqlTransaction = {
   id: string;
   description: string;
   date: string;
-  type: TransactionTypeGQL; // ✅ agora é string union
+  type: TransactionTypeGQL;
   amountCents: number;
+  categoryId: string | null;
   category: GqlCategory | null;
   createdAt: string;
   updatedAt: string;
 };
+
+// ✅ força tipagem com category incluída
+type TxWithCategory = Prisma.TransactionGetPayload<{ include: { category: true } }>;
 
 export const resolvers = {
   Transaction: {
@@ -160,6 +193,7 @@ export const resolvers = {
   Query: {
     async me(_: unknown, __: unknown, ctx: GraphQLContext): Promise<GqlUser> {
       const userId = requireUserId(ctx);
+      await ensureUser(ctx, userId);
 
       const user = await ctx.prisma.user.findUnique({ where: { id: userId } });
       if (!user) {
@@ -178,6 +212,7 @@ export const resolvers = {
 
     async categories(_: unknown, __: unknown, ctx: GraphQLContext): Promise<GqlCategory[]> {
       const userId = requireUserId(ctx);
+      await ensureUser(ctx, userId);
 
       const rows = await ctx.prisma.category.findMany({
         where: { userId },
@@ -197,15 +232,16 @@ export const resolvers = {
 
     async transactions(_: unknown, __: unknown, ctx: GraphQLContext): Promise<GqlTransaction[]> {
       const userId = requireUserId(ctx);
+      await ensureUser(ctx, userId);
 
-      const rows = await ctx.prisma.transaction.findMany({
+      const rows: TxWithCategory[] = await ctx.prisma.transaction.findMany({
         where: { userId },
         include: { category: true },
         orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       });
 
       return rows.map((t) => {
-        const safeType = assertTxType(t.type); // ✅ valida o que veio do banco
+        const safeType = prismaToGqlTxType(t.type);
 
         return {
           id: t.id,
@@ -213,6 +249,7 @@ export const resolvers = {
           date: t.date,
           type: safeType,
           amountCents: t.amountCents,
+          categoryId: t.categoryId ?? null,
           category: t.category
             ? {
                 id: t.category.id,
@@ -259,6 +296,7 @@ export const resolvers = {
 
     async updateProfile(_: unknown, args: { name: string }, ctx: GraphQLContext): Promise<GqlUser> {
       const userId = requireUserId(ctx);
+      await ensureUser(ctx, userId);
 
       const name = args.name.trim();
       if (name.length < 2) {
@@ -282,6 +320,7 @@ export const resolvers = {
 
     async createCategory(_: unknown, args: { input: CategoryInput }, ctx: GraphQLContext): Promise<GqlCategory> {
       const userId = requireUserId(ctx);
+      await ensureUser(ctx, userId);
 
       const title = args.input.title.trim();
       if (title.length < 2) {
@@ -317,6 +356,7 @@ export const resolvers = {
       ctx: GraphQLContext
     ): Promise<GqlCategory> {
       const userId = requireUserId(ctx);
+      await ensureUser(ctx, userId);
 
       const title = args.input.title.trim();
       if (title.length < 2) {
@@ -357,6 +397,7 @@ export const resolvers = {
 
     async deleteCategory(_: unknown, args: { id: string }, ctx: GraphQLContext): Promise<boolean> {
       const userId = requireUserId(ctx);
+      await ensureUser(ctx, userId);
 
       const existing = await ctx.prisma.category.findFirst({
         where: { id: args.id, userId },
@@ -377,6 +418,7 @@ export const resolvers = {
       ctx: GraphQLContext
     ): Promise<GqlTransaction> {
       const userId = requireUserId(ctx);
+      await ensureUser(ctx, userId);
 
       const description = args.input.description.trim();
       if (description.length < 2) {
@@ -385,26 +427,32 @@ export const resolvers = {
         });
       }
 
-      const cents = toCents(args.input.amount);
+      const cents =
+        typeof args.input.amountCents === "number"
+          ? Math.round(args.input.amountCents)
+          : typeof args.input.amount === "number"
+            ? toCents(args.input.amount)
+            : NaN;
+
       if (!Number.isInteger(cents) || cents <= 0) {
         throw new GraphQLError("Valor inválido", {
           extensions: { code: "BAD_USER_INPUT" },
         });
       }
 
-      const created = await ctx.prisma.transaction.create({
+      const created: TxWithCategory = await ctx.prisma.transaction.create({
         data: {
           userId,
           description,
           date: args.input.date,
-          type: args.input.type, // ✅ salva string "ENTRADA" | "SAIDA"
+          type: gqlToPrismaTxType(args.input.type),
           amountCents: cents,
           categoryId: args.input.categoryId ?? null,
         },
         include: { category: true },
       });
 
-      const safeType = assertTxType(created.type);
+      const safeType = prismaToGqlTxType(created.type);
 
       return {
         id: created.id,
@@ -412,6 +460,7 @@ export const resolvers = {
         date: created.date,
         type: safeType,
         amountCents: created.amountCents,
+        categoryId: created.categoryId ?? null,
         category: created.category
           ? {
               id: created.category.id,
@@ -434,6 +483,7 @@ export const resolvers = {
       ctx: GraphQLContext
     ): Promise<GqlTransaction> {
       const userId = requireUserId(ctx);
+      await ensureUser(ctx, userId);
 
       const existing = await ctx.prisma.transaction.findFirst({
         where: { id: args.id, userId },
@@ -451,26 +501,32 @@ export const resolvers = {
         });
       }
 
-      const cents = toCents(args.input.amount);
+      const cents =
+        typeof args.input.amountCents === "number"
+          ? Math.round(args.input.amountCents)
+          : typeof args.input.amount === "number"
+            ? toCents(args.input.amount)
+            : NaN;
+
       if (!Number.isInteger(cents) || cents <= 0) {
         throw new GraphQLError("Valor inválido", {
           extensions: { code: "BAD_USER_INPUT" },
         });
       }
 
-      const updated = await ctx.prisma.transaction.update({
+      const updated: TxWithCategory = await ctx.prisma.transaction.update({
         where: { id: args.id },
         data: {
           description,
           date: args.input.date,
-          type: args.input.type,
+          type: gqlToPrismaTxType(args.input.type),
           amountCents: cents,
           categoryId: args.input.categoryId ?? null,
         },
         include: { category: true },
       });
 
-      const safeType = assertTxType(updated.type);
+      const safeType = prismaToGqlTxType(updated.type);
 
       return {
         id: updated.id,
@@ -478,6 +534,7 @@ export const resolvers = {
         date: updated.date,
         type: safeType,
         amountCents: updated.amountCents,
+        categoryId: updated.categoryId ?? null,
         category: updated.category
           ? {
               id: updated.category.id,
@@ -496,6 +553,7 @@ export const resolvers = {
 
     async deleteTransaction(_: unknown, args: { id: string }, ctx: GraphQLContext): Promise<boolean> {
       const userId = requireUserId(ctx);
+      await ensureUser(ctx, userId);
 
       const existing = await ctx.prisma.transaction.findFirst({
         where: { id: args.id, userId },

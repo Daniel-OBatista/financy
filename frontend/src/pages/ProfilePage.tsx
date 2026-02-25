@@ -23,6 +23,8 @@ type UiState = {
   ok: string | null;
 };
 
+const AUTH_NAME_KEY = "financy_name"; // ✅ MESMA chave do AuthProvider
+
 function initialsFrom(text: string): string {
   const cleaned = text.trim();
   if (!cleaned) return "U";
@@ -41,6 +43,7 @@ export default function ProfilePage(): ReactElement {
   const [ui, setUi] = useState<UiState>({ saving: false, error: null, ok: null });
 
   const email = user?.email ?? "";
+
   const displayName = useMemo(() => {
     const n = (user?.name ?? "").trim();
     if (n) return n;
@@ -48,11 +51,14 @@ export default function ProfilePage(): ReactElement {
     return left ? left : "Conta";
   }, [user?.name, email]);
 
-  const initials = useMemo(() => initialsFrom((user?.name ?? "").trim() || email || "U"), [user?.name, email]);
+  const initials = useMemo(
+    () => initialsFrom((user?.name ?? "").trim() || email || "U"),
+    [user?.name, email]
+  );
 
   useEffect(() => {
-    // Se o backend não tiver profile, usamos fallback local
-    const local = window.localStorage.getItem("financy_profile_name") ?? "";
+    // ✅ baseia no user do contexto e no MESMO localStorage do AuthProvider
+    const local = window.localStorage.getItem(AUTH_NAME_KEY) ?? "";
     const base = (user?.name ?? "").trim() || local;
     setName(base);
   }, [user?.name]);
@@ -72,21 +78,18 @@ export default function ProfilePage(): ReactElement {
     setUi({ saving: true, error: null, ok: null });
 
     try {
-      // ✅ Se você tiver updateProfile no AuthProvider, salva no backend
       if (typeof auth.updateProfile === "function") {
         await auth.updateProfile({ name: trimmed });
-        if (typeof auth.refreshUser === "function") await auth.refreshUser();
-        setUi({ saving: false, error: null, ok: "Alterações salvas com sucesso." });
-        return;
+      } else {
+        // fallback ultra simples (não deve acontecer após a atualização)
+        window.localStorage.setItem(AUTH_NAME_KEY, trimmed);
       }
 
-      // ✅ Fallback local (não quebra a tela)
-      window.localStorage.setItem("financy_profile_name", trimmed);
-      setUi({
-        saving: false,
-        error: null,
-        ok: "Nome salvo localmente (backend ainda não possui endpoint de perfil).",
-      });
+      if (typeof auth.refreshUser === "function") {
+        await auth.refreshUser();
+      }
+
+      setUi({ saving: false, error: null, ok: "Alterações salvas com sucesso." });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Erro ao salvar.";
       setUi({ saving: false, error: msg, ok: null });
@@ -114,7 +117,6 @@ export default function ProfilePage(): ReactElement {
           </div>
 
           <div className="mt-6 space-y-4">
-            {/* Mensagens */}
             {ui.error ? (
               <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-600">
                 Erro: {ui.error}

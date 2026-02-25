@@ -60,7 +60,7 @@ export const GET_TRANSACTIONS = gql`
 `;
 
 export const CREATE_CATEGORY = gql`
-  mutation CreateCategory($input: CreateCategoryInput!) {
+  mutation CreateCategory($input: CategoryInput!) {
     createCategory(input: $input) {
       id
       title
@@ -74,8 +74,8 @@ export const CREATE_CATEGORY = gql`
 `;
 
 export const UPDATE_CATEGORY = gql`
-  mutation UpdateCategory($input: UpdateCategoryInput!) {
-    updateCategory(input: $input) {
+  mutation UpdateCategory($id: ID!, $input: CategoryInput!) {
+    updateCategory(id: $id, input: $input) {
       id
       title
       description
@@ -94,7 +94,7 @@ export const DELETE_CATEGORY = gql`
 `;
 
 export const CREATE_TRANSACTION = gql`
-  mutation CreateTransaction($input: CreateTransactionInput!) {
+  mutation CreateTransaction($input: TransactionInput!) {
     createTransaction(input: $input) {
       id
       description
@@ -115,8 +115,8 @@ export const CREATE_TRANSACTION = gql`
 `;
 
 export const UPDATE_TRANSACTION = gql`
-  mutation UpdateTransaction($input: UpdateTransactionInput!) {
-    updateTransaction(input: $input) {
+  mutation UpdateTransaction($id: ID!, $input: TransactionInput!) {
+    updateTransaction(id: $id, input: $input) {
       id
       description
       date
